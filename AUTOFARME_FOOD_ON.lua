@@ -1,9 +1,11 @@
--- AUTO FARM IFOOD AVANÇADO
--- Ajuste aqui a velocidade do fly (studs/segundo):
-local FLY_VELOCIDADE = 20 -- <<<<< ALTERE AQUI A VELOCIDADE
+-- AUTO FARM IFOOD ROBUSTO PARA SERVIDORES LAGADOS
+-- Ajuste a velocidade do fly aqui:
+local FLY_VELOCIDADE = 25 -- <<<<< ALTERE AQUI A VELOCIDADE
 
 -- Altura em que o personagem "voa" (0 = encostado no chão)
 local ALTURA_FLY = 1.5
+
+local MAX_TENTATIVAS_PEDIDO = 2 -- Quantas tentativas de pegar pedido caso não apareça o pad
 
 local player = game.Players.LocalPlayer
 local char = player.Character or player.CharacterAdded:Wait()
@@ -40,19 +42,14 @@ end
 
 -- Função de fly baixo, disfarçando como andar
 local function flyAte(pos)
-    -- Mantém o humanoid sempre "Running" e nunca caindo
     local destino = Vector3.new(pos.X, pos.Y + ALTURA_FLY, pos.Z)
     while (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(destino.X, 0, destino.Z)).Magnitude > tolerancia and _G.ifood_autofarm_ativo do
-        -- Noclip sempre ligado
         ativarNoclip()
-        -- Calcula direção só no plano XZ
         local atual = hrp.Position
         local dir = (Vector3.new(destino.X, atual.Y, destino.Z) - atual).Unit
         local passoXZ = math.min((Vector3.new(atual.X, 0, atual.Z) - Vector3.new(destino.X, 0, destino.Z)).Magnitude, FLY_VELOCIDADE * 0.08)
-        -- Mantém altura constante (ALTURA_FLY acima do solo)
         local proximo = Vector3.new(atual.X, 0, atual.Z) + Vector3.new(dir.X, 0, dir.Z) * passoXZ
         hrp.CFrame = CFrame.new(proximo.X, pos.Y + ALTURA_FLY, proximo.Z)
-        -- Simula andar (evita estado de queda)
         humanoid:ChangeState(Enum.HumanoidStateType.Running)
         humanoid.PlatformStand = false
         wait(0.03)
@@ -90,18 +87,45 @@ local function encontrarPadComPrompt()
     return nil, nil
 end
 
+-- Função para verificar se algum pad ficou com pedido
+local function existePedidoEmPad()
+    for i = 1, 7 do
+        local pad = padsFolder:FindFirstChild("Pad"..i)
+        if pad and pad:FindFirstChild("OrderChar") then
+            local prompt = pad.OrderChar:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 _G.ifood_autofarm_ativo = true
 
 spawn(function()
     ativarNoclip()
     while _G.ifood_autofarm_ativo do
         -- 1. Vai voando baixo até o prompt do pedido
-        flyAte(pedidoPrompt.Parent.Position)
-        wait(0.2)
-        firePrompt(pedidoPrompt)
-        wait(0.2)
-        firePrompt(pedidoPrompt)
-        wait(0.3)
+        local pedidoObtido = false
+        local tentativas = 0
+        repeat
+            tentativas = tentativas + 1
+            flyAte(pedidoPrompt.Parent.Position)
+            wait(0.2)
+            firePrompt(pedidoPrompt)
+            wait(0.2)
+            firePrompt(pedidoPrompt)
+            wait(0.3)
+            pedidoObtido = existePedidoEmPad()
+            if pedidoObtido then break end
+        until pedidoObtido or tentativas >= MAX_TENTATIVAS_PEDIDO or not _G.ifood_autofarm_ativo
+
+        -- Se não pegou o pedido, pode esperar e tentar de novo (volta pro início do loop)
+        if not pedidoObtido then
+            wait(0.8)
+            continue
+        end
 
         -- 2. Busca o pad de entrega com pedido pronto!
         local pad, padPrompt = nil, nil
@@ -122,12 +146,8 @@ spawn(function()
     desativarNoclip()
 end)
 
---[[ 
-Se quiser parar o autofarm:
-_G.ifood_autofarm_ativo = false 
-if getgenv().noclipConn then pcall(function() getgenv().noclipConn:Disconnect() end) end
-]]
+-- Para parar o autofarm:
+-- _G.ifood_autofarm_ativo = false 
+-- if getgenv().noclipConn then pcall(function() getgenv().noclipConn:Disconnect() end) end
 
---[[ 
-DICA: Para ajustar velocidade altere a variável FLY_VELOCIDADE no topo do script!
-]]
+-- DICA: Para ajustar velocidade altere a variável FLY_VELOCIDADE no topo do script!
