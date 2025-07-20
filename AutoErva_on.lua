@@ -2,7 +2,7 @@
 -- Adaptação para potes que têm mesmo nome ("PoteErva") e podem se repetir
 -- Ref: ![image1](image1)
 
-local FLY_VELOCIDADE = 25
+local FLY_VELOCIDADE = 32
 local ALTURA_FLY = 1.5
 local DISTANCIA_MINIMA_CHAO = 1
 local tolerancia = 2
