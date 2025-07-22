@@ -1,10 +1,10 @@
--- AUTO FARM IFOOD ROBUSTO PARA SERVIDORES LAGADOS
--- Ajuste a velocidade do fly aqui:
-local FLY_VELOCIDADE = 25 -- <<<<< ALTERE AQUI A VELOCIDADE
+-- AUTO FARM IFOOD ROBUSTO COM FLY RAYCAST
+-- Usa fly baixo com raycast, noclip e controle para ativar/desativar noclip ao pegar e entregar pedidos.
 
--- Altura em que o personagem "voa" (0 = encostado no chão)
-local ALTURA_FLY = 1.5
-
+local FLY_VELOCIDADE = 25 -- Velocidade do fly
+local ALTURA_FLY = 1.5    -- Altura do fly
+local DISTANCIA_MINIMA_CHAO = 1
+local tolerancia = 2
 local MAX_TENTATIVAS_PEDIDO = 2 -- Quantas tentativas de pegar pedido caso não apareça o pad
 
 local player = game.Players.LocalPlayer
@@ -12,15 +12,10 @@ local char = player.Character or player.CharacterAdded:Wait()
 local hrp = char:WaitForChild("HumanoidRootPart")
 local humanoid = char:WaitForChild("Humanoid")
 
--- Caminho para pegar pedido/bag
 local pedidoPrompt = workspace:WaitForChild("Construcoes"):WaitForChild("Pizzaria"):WaitForChild("ifoodplace"):WaitForChild("Pizza3"):WaitForChild("ProximityPrompt")
-
--- Caminho dos pads de entrega
 local padsFolder = workspace:WaitForChild("Construcoes"):WaitForChild("Pizzaria"):WaitForChild("OrderCharSpawns")
 
-local tolerancia = 2
-
--- Noclip enquanto voa
+-- Noclip (raycast)
 getgenv().noclipConn = getgenv().noclipConn or nil
 local function ativarNoclip()
     if not getgenv().noclipConn then
@@ -40,23 +35,28 @@ local function desativarNoclip()
     end
 end
 
--- Função de fly baixo, disfarçando como andar
-local function flyAte(pos)
-    local destino = Vector3.new(pos.X, pos.Y + ALTURA_FLY, pos.Z)
-    while (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(destino.X, 0, destino.Z)).Magnitude > tolerancia and _G.ifood_autofarm_ativo do
+-- Fly com raycast, igual ao script de plantas (ativa/desativa noclip internamente)
+local function flyAteProximoChao(pos, toleranciaChegada)
+    toleranciaChegada = toleranciaChegada or tolerancia
+    local destinoXZ = Vector3.new(pos.X, 0, pos.Z)
+    while (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - destinoXZ).Magnitude > toleranciaChegada and _G.ifood_autofarm_ativo do
         ativarNoclip()
         local atual = hrp.Position
-        local dir = (Vector3.new(destino.X, atual.Y, destino.Z) - atual).Unit
-        local passoXZ = math.min((Vector3.new(atual.X, 0, atual.Z) - Vector3.new(destino.X, 0, destino.Z)).Magnitude, FLY_VELOCIDADE * 0.08)
-        local proximo = Vector3.new(atual.X, 0, atual.Z) + Vector3.new(dir.X, 0, dir.Z) * passoXZ
-        hrp.CFrame = CFrame.new(proximo.X, pos.Y + ALTURA_FLY, proximo.Z)
+        local dir = (Vector3.new(pos.X, atual.Y, pos.Z) - atual).Unit
+        local passoXZ = math.min((Vector3.new(atual.X, 0, atual.Z) - destinoXZ).Magnitude, FLY_VELOCIDADE * 0.08)
+        local proximoXZ = Vector3.new(atual.X, 0, atual.Z) + Vector3.new(dir.X, 0, dir.Z) * passoXZ
+        local rayOrigem = Vector3.new(proximoXZ.X, atual.Y + 50, proximoXZ.Z)
+        local rayDirecao = Vector3.new(0, -200, 0)
+        local hit, hitPos = workspace:FindPartOnRay(Ray.new(rayOrigem, rayDirecao), char)
+        local alturaDestino = hitPos and (hitPos.Y + DISTANCIA_MINIMA_CHAO + ALTURA_FLY) or (pos.Y + ALTURA_FLY)
+        hrp.CFrame = CFrame.new(proximoXZ.X, alturaDestino, proximoXZ.Z)
         humanoid:ChangeState(Enum.HumanoidStateType.Running)
         humanoid.PlatformStand = false
         wait(0.03)
     end
-    if _G.ifood_autofarm_ativo then
-        hrp.CFrame = CFrame.new(destino)
-    end
+    -- Chegou no destino: desativa noclip/raycast
+    desativarNoclip()
+    hrp.CFrame = CFrame.new(pos.X, pos.Y + ALTURA_FLY, pos.Z)
 end
 
 -- Função universal para acionar ProximityPrompt
@@ -104,14 +104,15 @@ end
 _G.ifood_autofarm_ativo = true
 
 spawn(function()
-    ativarNoclip()
     while _G.ifood_autofarm_ativo do
-        -- 1. Vai voando baixo até o prompt do pedido
+        -- 1. Vai voando baixo (fly raycast) até o prompt do pedido
+        ativarNoclip() -- Garante que começa com noclip ativado
         local pedidoObtido = false
         local tentativas = 0
         repeat
             tentativas = tentativas + 1
-            flyAte(pedidoPrompt.Parent.Position)
+            flyAteProximoChao(pedidoPrompt.Parent.Position) -- Desativa noclip ao chegar
+            -- Noclip agora está DESATIVADO aqui
             wait(0.2)
             firePrompt(pedidoPrompt)
             wait(0.2)
@@ -119,6 +120,7 @@ spawn(function()
             wait(0.3)
             pedidoObtido = existePedidoEmPad()
             if pedidoObtido then break end
+            ativarNoclip() -- Reativa noclip antes de tentar voar de novo, se necessário
         until pedidoObtido or tentativas >= MAX_TENTATIVAS_PEDIDO or not _G.ifood_autofarm_ativo
 
         -- Se não pegou o pedido, pode esperar e tentar de novo (volta pro início do loop)
@@ -135,8 +137,10 @@ spawn(function()
         until pad and padPrompt or not _G.ifood_autofarm_ativo
         if not pad or not padPrompt then wait(1) continue end
 
-        -- 3. Vai voando baixo até o pad de entrega
-        flyAte(pad.Position)
+        -- 3. Vai voando baixo até o pad de entrega (com raycast/noclip)
+        ativarNoclip()
+        flyAteProximoChao(pad.Position)
+        -- Noclip DESATIVADO ao chegar
         wait(0.2)
 
         -- 4. Entrega o pedido
